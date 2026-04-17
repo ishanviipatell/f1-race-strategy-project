@@ -1,164 +1,254 @@
-from src.f1_data import get_race_telemetry, enable_cache, get_circuit_rotation, load_session, get_quali_telemetry, list_rounds, list_sprints
-from src.run_session import run_arcade_replay, launch_insights_menu
-from src.interfaces.qualifying import run_qualifying_replay
 import sys
-from src.cli.race_selection import cli_load
-from src.gui.race_selection import RaceSelectionWindow
-from PySide6.QtWidgets import QApplication
-from src.lib.season import get_season
-import logging
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QLabel, QFrame, QScrollArea, QMessageBox
+)
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 
-def main(year=None, round_number=None, playback_speed=1, session_type='R', visible_hud=True, ready_file=None, show_telemetry_viewer=True):
-  print(f"Loading F1 {year} Round {round_number} Session '{session_type}'")
-  session = load_session(year, round_number, session_type)
 
-  print(f"Loaded session: {session.event['EventName']} - {session.event['RoundNumber']} - {session_type}")
-
-  # Enable cache for fastf1
-  enable_cache()
-
-  if session_type == 'Q' or session_type == 'SQ':
-
-    # Get the drivers who participated and their lap times
-
-    qualifying_session_data = get_quali_telemetry(session, session_type=session_type)
-
-    # Run the arcade screen showing qualifying results
-
-    title = f"{session.event['EventName']} - {'Sprint Qualifying' if session_type == 'SQ' else 'Qualifying Results'}"
+class InsightsMenu(QMainWindow):
     
-    run_qualifying_replay(
-      session=session,
-      data=qualifying_session_data,
-      title=title,
-      ready_file=ready_file,
-    )
-
-  else:
-
-    # Get the drivers who participated in the race
-
-    race_telemetry = get_race_telemetry(session, session_type=session_type)
-
-    # Get example lap for track layout
-    # Qualifying lap preferred for DRS zones (fallback to fastest race lap (no DRS data))
-    example_lap = None
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("F1 Insights")
+        self.setGeometry(50, 50, 350, 650)
+        
+        # Keep references to opened windows
+        self.opened_windows = []
+        self.current_window_idx = 0 # Tracks which window is active for gestures
+        
+        self.setup_ui()
     
-    try:
-        print("Attempting to load qualifying session for track layout...")
-        quali_session = load_session(year, round_number, 'Q')
-        if quali_session is not None and len(quali_session.laps) > 0:
-            fastest_quali = quali_session.laps.pick_fastest()
-            if fastest_quali is not None:
-                quali_telemetry = fastest_quali.get_telemetry()
-                if 'DRS' in quali_telemetry.columns:
-                    example_lap = quali_telemetry
-                    print(f"Using qualifying lap from driver {fastest_quali['Driver']} for DRS Zones")
-    except Exception as e:
-        print(f"Could not load qualifying session: {e}")
+    def setup_ui(self):
+        # Central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        # Main layout
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Header
+        header = self.create_header()
+        main_layout.addWidget(header)
+        
+        # Scrollable content area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(2)
+        content_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Add insight categories
+        content_layout.addWidget(self.create_category_section(
+            "Example Insights",
+            [
+                ("Example Insight Window", "Launch an example insight window", self.launch_example_window),
+            ]
+        ))
 
-    # fallback: Use fastest race lap
-    if example_lap is None:
-        fastest_lap = session.laps.pick_fastest()
-        if fastest_lap is not None:
-            example_lap = fastest_lap.get_telemetry()
-            print("Using fastest race lap (DRS detection may use speed-based fallback)")
-        else:
-            print("Error: No valid laps found in session")
+        content_layout.addWidget(self.create_category_section(
+            "Live Telemetry",
+            [
+                ("Telemetry Stream Viewer", "View raw telemetry data", self.launch_telemetry_viewer),
+                ("Driver Live Telemetry", "Speed, gear, throttle & braking for a selected driver", self.launch_driver_telemetry),
+            ]
+        ))
+
+        content_layout.addWidget(self.create_category_section(
+            "Track",
+            [
+                ("Track Position Map", "Live driver positions plotted on a circular track map", self.launch_track_position),
+            ]
+        ))
+
+        content_layout.addWidget(self.create_category_section(
+            "Hardware",
+            [
+                ("Physical Pit Wall", "Control replay with sensors & servo", self.launch_hardware_link),
+            ]
+        ))
+
+        # --- DYNAMIC STRATEGY SECTION ---
+        content_layout.addWidget(self.create_category_section(
+            "Strategy",
+            [
+                ("Tyre Strategy Dashboard", "Dynamic pit windows & tyre predictions", self.launch_tyre_strategy),
+            ]
+        ))
+        
+        content_layout.addStretch()
+        
+        scroll.setWidget(content_widget)
+        main_layout.addWidget(scroll)
+        
+        # Footer
+        footer = self.create_footer()
+        main_layout.addWidget(footer)
+    
+    def create_header(self):
+        header = QFrame()
+        header.setFrameShape(QFrame.NoFrame)
+        layout = QVBoxLayout(header)
+        title = QLabel("🏎️ F1 Insights")
+        title.setFont(QFont("Arial", 24, QFont.Bold))
+        layout.addWidget(title)
+        subtitle = QLabel("Launch telemetry insights and analysis tools")
+        subtitle.setFont(QFont("Arial", 11))
+        layout.addWidget(subtitle)
+        return header
+    
+    def create_footer(self):
+        footer = QFrame()
+        footer.setFrameShape(QFrame.NoFrame)
+        layout = QHBoxLayout(footer)
+        info_label = QLabel("Requires telemetry stream enabled")
+        info_label.setFont(QFont("Arial", 10))
+        layout.addWidget(info_label)
+        layout.addStretch()
+        close_btn = QPushButton("Close Menu")
+        close_btn.setFixedWidth(100)
+        close_btn.clicked.connect(self.close)
+        layout.addWidget(close_btn)
+        return footer
+    
+    def create_category_section(self, category_name, insights):
+        section = QFrame()
+        section.setFrameShape(QFrame.NoFrame)
+        layout = QVBoxLayout(section)
+        layout.setSpacing(4)
+        category_label = QLabel(category_name.upper())
+        category_label.setFont(QFont("Arial", 12, QFont.Bold))
+        layout.addWidget(category_label)
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        layout.addWidget(separator)
+        for name, description, callback in insights:
+            btn = self.create_insight_button(name, description, callback)
+            layout.addWidget(btn)
+        return section
+    
+    def create_insight_button(self, name, description, callback):
+        button = QPushButton()
+        button.setCursor(Qt.PointingHandCursor)
+        btn_layout = QVBoxLayout()
+        btn_layout.setSpacing(2)
+        btn_layout.setContentsMargins(4, 4, 4, 4)
+        name_label = QLabel(name)
+        name_label.setFont(QFont("Arial", 12, QFont.Bold))
+        desc_label = QLabel(description)
+        desc_label.setFont(QFont("Arial", 10))
+        btn_layout.addWidget(name_label)
+        btn_layout.addWidget(desc_label)
+        button.setLayout(btn_layout)
+        button.setMinimumHeight(50)
+        button.clicked.connect(callback)
+        return button
+    
+    # Insight launch methods 
+    def launch_example_window(self):
+        from src.insights.example_pit_wall_window import ExamplePitWallWindow
+        example_window = ExamplePitWallWindow()
+        example_window.show()
+        self.opened_windows.append(example_window)
+
+    def launch_driver_telemetry(self):
+        from src.insights.driver_telemetry_window import DriverTelemetryWindow
+        window = DriverTelemetryWindow()
+        window.show()
+        self.opened_windows.append(window)
+
+    def launch_track_position(self):
+        from src.insights.track_position_window import TrackPositionWindow
+        window = TrackPositionWindow()
+        window.show()
+        self.opened_windows.append(window)
+
+    def launch_telemetry_viewer(self):
+        try:
+            import subprocess
+            import sys
+            subprocess.Popen([sys.executable, "-m", "src.insights.telemetry_stream_viewer"])
+        except Exception as e:
+            self.show_placeholder_message("Telemetry Stream Viewer")
+            
+    # --- LAUNCHES DYNAMIC DASHBOARD ---
+    def launch_tyre_strategy(self):
+        from src.gui.strategy_dashboard import StrategyDashboardWindow
+        window = StrategyDashboardWindow() 
+        window.show()
+        self.opened_windows.append(window)
+
+    def launch_hardware_link(self):
+        print("🚀 Launching: Physical Hardware Link")
+        from src.insights.hardware_link import HardwareLinkWindow
+        window = HardwareLinkWindow()
+        
+        # --- BRIDGING CODE: Connect gesture signal from hardware to window cycler ---
+        window.request_tab_change.connect(self.handle_gesture_window_switch)
+        
+        window.show()
+        self.opened_windows.append(window)
+
+    # --- BRIDGING CODE: Function to cycle active windows via Hand Wave ---
+    def handle_gesture_window_switch(self, direction):
+        """Cycles focus through the opened insight windows based on hand gestures."""
+        # Clean up the list to remove any windows the user manually closed
+        self.opened_windows = [w for w in self.opened_windows if w.isVisible()]
+        
+        if not self.opened_windows:
             return
-
-    drivers = session.drivers
-
-    # Get circuit rotation
-
-    circuit_rotation = get_circuit_rotation(session)
+            
+        # Move the index backwards (to previous window)
+        if direction == "prev":
+            self.current_window_idx -= 1
+            
+        # Wrap around the index so it loops infinitely instead of crashing
+        self.current_window_idx = self.current_window_idx % len(self.opened_windows)
+        
+        # Bring the selected window to the front
+        target_window = self.opened_windows[self.current_window_idx]
+        target_window.showNormal() # Restores it if minimized
+        target_window.raise_()     # Brings it to the top of the window stack
+        target_window.activateWindow() # Gives it focus
     
-    # Prepare session info for display banner
-    session_info = {
-        'event_name': session.event.get('EventName', ''),
-        'circuit_name': session.event.get('Location', ''),  # Circuit location/name
-        'country': session.event.get('Country', ''),
-        'year': year,
-        'round': round_number,
-        'date': session.event.get('EventDate', '').strftime('%B %d, %Y') if session.event.get('EventDate') else '',
-        'total_laps': race_telemetry['total_laps'],
-        'circuit_length_m': float(example_lap["Distance"].max()) if example_lap is not None and "Distance" in example_lap else None,
-    }
+    def launch_speed_monitor(self): self.show_placeholder_message("Speed Monitor")
+    def launch_position_tracker(self): self.show_placeholder_message("Position Tracker")
+    def launch_pit_analysis(self): self.show_placeholder_message("Pit Stop Analysis")
+    def launch_gap_analysis(self): self.show_placeholder_message("Gap Analysis")
+    def launch_sector_times(self): self.show_placeholder_message("Sector Times")
+    def launch_lap_evolution(self): self.show_placeholder_message("Lap Time Evolution")
+    def launch_top_speed(self): self.show_placeholder_message("Top Speed Tracker")
+    def launch_flag_tracker(self): self.show_placeholder_message("Flag Tracker")
+    def launch_overtake_counter(self): self.show_placeholder_message("Overtake Counter")
+    def launch_drs_usage(self): self.show_placeholder_message("DRS Usage")
+    
+    def show_placeholder_message(self, insight_name):
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Coming Soon")
+        msg.setIcon(QMessageBox.Information)
+        msg.setText(f"{insight_name} will be available soon!")
+        msg.exec()
 
-    # Launch insights menu (always shown with replay)
-    launch_insights_menu()
-    print("Launching insights menu...")
 
-    # Run the arcade replay
+def launch_insights_menu():
+    app = QApplication.instance()
+    if app is None: app = QApplication(sys.argv)
+    menu = InsightsMenu()
+    menu.show()
+    return menu
 
-    run_arcade_replay(
-      frames=race_telemetry['frames'],
-      track_statuses=race_telemetry['track_statuses'],
-      example_lap=example_lap,
-      drivers=drivers,
-      playback_speed=playback_speed,
-      driver_colors=race_telemetry['driver_colors'],
-      title=f"{session.event['EventName']} - {'Sprint' if session_type == 'S' else 'Race'}",
-      total_laps=race_telemetry['total_laps'],
-      circuit_rotation=circuit_rotation,
-      visible_hud=visible_hud,
-      ready_file=ready_file,
-      session_info=session_info,
-      session=session,
-      enable_telemetry=True # This is now permanently enabled to support the telemetry insights menu if the user decides to use it
-    )
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName("F1 Insights Menu")
+    menu = InsightsMenu()
+    menu.show()
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
-
-  if "--verbose" not in sys.argv:# fastf1 logging is disabled by default
-    logging.getLogger("fastf1").setLevel(logging.CRITICAL)
-
-  if "--cli" in sys.argv:
-    # Run the CLI
-    cli_load()
-    sys.exit(0)
-
-  if "--year" in sys.argv:
-    year_index = sys.argv.index("--year") + 1
-    year = int(sys.argv[year_index])
-  else:
-    year = get_season()  # Default year
-
-  if "--round" in sys.argv:
-    round_index = sys.argv.index("--round") + 1
-    round_number = int(sys.argv[round_index])
-  else:
-    round_number = 12  # Default round number
-
-  if "--list-rounds" in sys.argv:
-    list_rounds(year)
-  elif "--list-sprints" in sys.argv:
-    list_sprints(year)
-  else:
-    playback_speed = 1
-
-  if "--viewer" in sys.argv:
-  
-    visible_hud = True
-    if "--no-hud" in sys.argv:
-      visible_hud = False
-
-    # Session type selection
-    session_type = 'SQ' if "--sprint-qualifying" in sys.argv else ('S' if "--sprint" in sys.argv else ('Q' if "--qualifying" in sys.argv else 'R'))
-
-    # Optional ready-file path used when spawned from the GUI to signal ready state
-    ready_file = None
-    if "--ready-file" in sys.argv:
-      idx = sys.argv.index("--ready-file") + 1
-      if idx < len(sys.argv):
-        ready_file = sys.argv[idx]
-
-    main(year, round_number, playback_speed, session_type=session_type, visible_hud=visible_hud, ready_file=ready_file)
-    sys.exit(0)
-
-  # Run the GUI
-
-  app = QApplication(sys.argv)
-  win = RaceSelectionWindow()
-  win.show()
-  sys.exit(app.exec())
+    main()
