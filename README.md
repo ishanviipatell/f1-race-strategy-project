@@ -280,13 +280,12 @@ python main.py --viewer --year 2024 --round 5 --qualifying
 
 #### Playback Speeds
 
-Preset speeds: **0.1x, 0.2x, 0.5x, 1.0x, 2.0x, 4.0x, 8.0x, 16.0x, 32.0x, 64.0x, 128.0x, 256.0x**
+Preset speeds: **0.1x, 0.2x, 0.5x, 1.0x, 2.0x, 4.0x, 8.0x**
 
 Use speed to:
 - **0.5x-1.0x**: Analyze critical moments in detail
 - **2.0x-4.0x**: Quick race overview
-- **8.0x-64.0x**: Jump through race phases
-- **128.0x-256.0x**: Skip to end instantly
+- **4.0x-8.0x**: Jump through race phases
 
 ### Understanding the Display Elements
 
